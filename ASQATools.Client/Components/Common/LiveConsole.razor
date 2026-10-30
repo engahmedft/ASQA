@@ -1,0 +1,35 @@
+<div class="card border-0 shadow-sm bg-black rounded-3 overflow-hidden mt-3">
+    <div class="d-flex justify-content-between align-items-center px-3 py-2" style="background: #1e1e1e; border-bottom: 1px solid #333;">
+        <div class="d-flex align-items-center gap-2">
+            <span class="rounded-circle d-inline-block" style="width: 12px; height: 12px; background: #ff5f56;"></span>
+            <span class="rounded-circle d-inline-block" style="width: 12px; height: 12px; background: #ffbd2e;"></span>
+            <span class="rounded-circle d-inline-block" style="width: 12px; height: 12px; background: #27c93f;"></span>
+            <span class="text-secondary font-monospace small ms-2">ASQATools Live Console</span>
+        </div>
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2 font-monospace text-light" @onclick="OnClear">
+            Clear Log
+        </button>
+    </div>
+    <div class="p-3 font-monospace" style="height: 340px; overflow-y: auto; background-color: #0c0c0c;">
+        @if (Logs.Count == 0) { <span class="text-muted">$ ready... waiting for operation to start</span> }
+        @foreach (var log in Logs)
+        {
+            <div class="mb-1 text-break" style="line-height: 1.45;">
+                <span style="color: #6c757d;">[@log.Timestamp.ToString("HH:mm:ss")]</span>
+                @if (log.Message.StartsWith("===")) { <span style="color: #00e5ff; font-weight: bold;">@log.Message</span> }
+                else if (log.Message.Contains("✔") || log.Message.Contains("[OK") || log.Message.Contains("[RESOLVED") || log.Message.Contains("[REPLACED") || log.Message.Contains("[PURGED]")) { <span style="color: #00ff66;">@log.Message</span> }
+                else if (log.Message.Contains("❌") || log.Message.Contains("Failed") || log.Message.Contains("Exception") || log.Message.Contains("STILL BROKEN") || log.Message.StartsWith("   at ")) { <span style="color: #ff3344; font-weight: bold;">@log.Message</span> }
+                else if (log.Message.Contains("⚠") || log.Message.Contains("WARNING") || log.Message.Contains("[NEW MEDIUM]")) { <span style="color: #ffcc00;">@log.Message</span> }
+                else if (log.Message.Contains("🔒") || log.Message.Contains("[UNCHANGED]")) { <span style="color: #b388ff;">@log.Message</span> }
+                else if (log.Message.Contains("ℹ") || log.Message.Contains("🧹")) { <span style="color: #38bdf8;">@log.Message</span> }
+                else { <span style="color: #e0e0e0;">@log.Message</span> }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    public record TerminalLog(DateTime Timestamp, string Message);
+    [Parameter] public List<TerminalLog> Logs { get; set; } = new();
+    [Parameter] public EventCallback OnClear { get; set; }
+}

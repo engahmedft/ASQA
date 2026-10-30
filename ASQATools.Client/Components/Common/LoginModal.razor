@@ -1,0 +1,53 @@
+@using ASQATools.Shared.Models
+
+@if (Show)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content p-3 shadow">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-dark">Sign In to http://tfs</h5>
+                    <button type="button" class="btn-close" @onclick="OnClose"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold">Domain</label>
+                        <input type="text" class="form-control" @bind="Domain" placeholder="e.g. malath" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold">Username</label>
+                        <input type="text" class="form-control" @bind="Username" placeholder="Enter domain username..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Password</label>
+                        <input type="password" class="form-control" @bind="Password" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(Error)) { <div class="alert alert-danger py-1 small">@Error</div> }
+                    <button class="btn btn-primary w-100 fw-bold py-2" @onclick="Submit">Sign In</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Show { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<DomainLoginRequest> OnSubmit { get; set; }
+    [Parameter] public string Error { get; set; } = string.Empty;
+
+    public string Domain { get; set; } = "malath";
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+
+    private async Task Submit()
+    {
+        await OnSubmit.InvokeAsync(new DomainLoginRequest
+        {
+            Domain = Domain,
+            Username = Username,
+            Password = Password
+        });
+        Password = "";
+    }
+}

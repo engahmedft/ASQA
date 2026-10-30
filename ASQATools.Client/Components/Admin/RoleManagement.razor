@@ -1,0 +1,440 @@
+@using ASQATools.Shared.Models
+@inject HttpClient Http
+
+<div class="card shadow-sm p-4 bg-white mb-3" style="border: 1px solid #cbd5e1 !important;">
+    <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+        <div>
+            <h4 class="fw-bold mb-0 text-dark">⚙️ Role & Access Control (RBAC) Manager</h4>
+            <small class="text-muted">Structured permission groups & live Active Directory integration</small>
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-success btn-sm fw-bold" @onclick="() => ShowCreateModal = true">
+                ➕ Create Custom Role
+            </button>
+            <button class="btn btn-primary btn-sm fw-bold" @onclick="RefreshAllAsync">
+                🔄 Refresh Database & Roles
+            </button>
+        </div>
+    </div>
+
+    @if (Db != null)
+    {
+        <div class="row g-4">
+            <!-- Left: Categorized Dynamic Roles Matrix -->
+            <div class="col-md-7">
+                <h6 class="fw-bold text-dark small text-uppercase mb-3">Roles & Permissions Matrix</h6>
+                <div class="table-responsive">
+                    <table class="table table-bordered align-middle">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 220px;">Role</th>
+                                <th>Category-Based Permissions</th>
+                                <th style="width: 100px;">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var role in Db.Roles)
+                            {
+                                <tr>
+                                    <td>
+                                        <div class="d-flex align-items-center gap-1">
+                                            <strong class="@(role.Name == "Admin" ? "text-danger" : role.Name.Contains("Manager") ? "text-primary" : role.Name == "Quality Reviewer" ? "text-success" : "text-dark")">
+                                                @role.Name
+                                            </strong>
+                                            @if (role.IsFixed)
+                                            {
+                                                <span class="badge bg-secondary" style="font-size: 0.65rem;">Fixed</span>
+                                            }
+                                        </div>
+                                        <div class="small text-muted" style="font-size: 0.78rem;">@role.Description</div>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex flex-column gap-2">
+                                            @foreach (var cat in GroupedPermissions)
+                                            {
+                                                <div class="p-2 rounded bg-light border-0" style="background: #f8fafc; border: 1px solid #e2e8f0 !important;">
+                                                    <div class="text-uppercase text-secondary fw-bold mb-1" style="font-size: 0.68rem; letter-spacing: 0.5px;">@cat.CategoryName</div>
+                                                    <div class="d-flex flex-wrap gap-2">
+                                                        @foreach (var perm in cat.Permissions)
+                                                        {
+                                                            bool has = role.Permissions.Contains(perm.Key);
+                                                            <div class="form-check form-check-inline mb-0">
+                                                                <input class="form-check-input" type="checkbox" id="@($"{role.Name}_{perm.Key}")"
+                                                                       checked="@has"
+                                                                       @onchange='(e) => TogglePermission(role, perm.Key, (bool)e.Value!)' />
+                                                                <label class="form-check-label small" for="@($"{role.Name}_{perm.Key}")" style="font-size: 0.8rem;">@perm.Label</label>
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                </div>
+                                            }
+                                        </div>
+                                    </td>
+                                    <td>
+                                        <div class="d-flex flex-column gap-1">
+                                            <button class="btn btn-sm btn-primary fw-bold py-1" @onclick="() => SaveRolePermissions(role)">
+                                                💾 Save
+                                            </button>
+                                            @if (!role.IsFixed)
+                                            {
+                                                <button class="btn btn-sm btn-outline-danger fw-bold py-1" @onclick="() => DeleteRoleAsync(role.Name)" title="Delete Role">
+                                                    🗑️
+                                                </button>
+                                            }
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right: Auto-Complete User Search & Role Assignment -->
+            <div class="col-md-5">
+                <h6 class="fw-bold text-dark small text-uppercase mb-3">Assign Users to Roles</h6>
+                <div class="card p-3 bg-light mb-3 position-relative">
+                    <div class="mb-2">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <label class="form-label small fw-bold mb-1">Target User:</label>
+                            @if (!string.IsNullOrWhiteSpace(SelectedUsername))
+                            {
+                                <button class="btn btn-link btn-sm text-danger p-0 text-decoration-none small fw-semibold" @onclick="ClearSelectedUser">
+                                    ✕ Clear Selection
+                                </button>
+                            }
+                        </div>
+                        <input type="text" class="form-control form-control-sm"
+                               value="@SearchQuery"
+                               @oninput="OnUserSearchInput"
+                               placeholder="Type username or pick from assigned users below..." />
+
+                        @if (IsSearching)
+                        {
+                            <div class="small text-muted mt-1"><span class="spinner-border spinner-border-sm me-1"></span>Searching TFS...</div>
+                        }
+
+                        @if (FoundIdentities.Count > 0)
+                        {
+                            <div class="list-group position-absolute shadow mt-1 w-100" style="z-index: 1050; max-height: 220px; overflow-y: auto;">
+                                @foreach (var id in FoundIdentities)
+                                {
+                                    <button type="button" class="list-group-item list-group-item-action py-2" @onclick="() => SelectIdentity(id)">
+                                        <div class="fw-bold small text-dark">@id.DisplayName</div>
+                                        <div class="small text-muted font-monospace">@id.AccountName @(!string.IsNullOrEmpty(id.MailAddress) ? $"({id.MailAddress})" : "")</div>
+                                    </button>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Select Role:</label>
+                        <select class="form-select form-select-sm" @bind="SelectedRole">
+                            @foreach (var r in Db.Roles)
+                            {
+                                <option value="@r.Name">@r.Name</option>
+                            }
+                        </select>
+                    </div>
+
+                    <button class="btn btn-success btn-sm w-100 fw-bold" @onclick="AssignUserRoleAsync" disabled="@string.IsNullOrWhiteSpace(SelectedUsername)">
+                        ➕ Assign Role to: @(string.IsNullOrWhiteSpace(SelectedUsername) ? "(Type or pick user)" : SelectedUsername)
+                    </button>
+                </div>
+
+                <!-- Assigned Users Filter & Table -->
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <h6 class="fw-bold text-dark small text-uppercase mb-0">Assigned Users (@FilteredUserMappings.Count)</h6>
+                    <input type="text" class="form-control form-control-sm" style="width: 170px;"
+                           @bind="TableFilter" @bind:event="oninput"
+                           placeholder="Filter assigned..." />
+                </div>
+
+                <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+                    <table class="table table-sm table-striped align-middle">
+                        <thead>
+                            <tr><th>User</th><th>Assigned Roles (Click × to remove)</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var u in FilteredUserMappings)
+                            {
+                                <tr>
+                                    <td class="font-monospace small">
+                                        <button class="btn btn-link btn-sm text-decoration-none fw-bold p-0 text-start font-monospace"
+                                                @onclick="() => SelectUserFromTable(u.Username)"
+                                                title="Click to select this user">
+                                            👤 @u.Username
+                                        </button>
+                                    </td>
+                                    <td>
+                                        @foreach (var r in u.Roles)
+                                        {
+                                            <span class="badge @(r == "Admin" ? "bg-danger" : r.Contains("Manager") ? "bg-primary" : r == "Quality Reviewer" ? "bg-success" : "bg-secondary") me-1 d-inline-flex align-items-center gap-1">
+                                                @r
+                                                <button type="button" class="btn-close btn-close-white" style="font-size: 0.55rem;"
+                                                        @onclick="() => UnassignRole(u.Username, r)" title="Remove role"></button>
+                                            </span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@if (ShowCreateModal)
+{
+    <div class="modal fade show d-block" style="background: rgba(0,0,0,0.5);" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content p-3 shadow">
+                <div class="modal-header">
+                    <h5 class="modal-title fw-bold text-dark">➕ Create New Custom Role</h5>
+                    <button type="button" class="btn-close" @onclick="() => ShowCreateModal = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small fw-bold">Role Name</label>
+                        <input type="text" class="form-control" @bind="NewRoleName" placeholder="e.g. Lead QA Auditor" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Description</label>
+                        <input type="text" class="form-control" @bind="NewRoleDescription" placeholder="Role description..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-bold">Select Tool Permissions</label>
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (var cat in GroupedPermissions)
+                            {
+                                <div class="p-2 rounded bg-light border">
+                                    <div class="text-uppercase text-secondary fw-bold mb-1 small">@cat.CategoryName</div>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var perm in cat.Permissions)
+                                        {
+                                            bool has = NewRolePermissions.Contains(perm.Key);
+                                            <div class="form-check form-check-inline">
+                                                <input class="form-check-input" type="checkbox" id="@($"new_{perm.Key}")"
+                                                       checked="@has"
+                                                       @onchange='(e) => ToggleNewRolePermission(perm.Key, (bool)e.Value!)' />
+                                                <label class="form-check-label small" for="@($"new_{perm.Key}")">@perm.Label</label>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                    @if (!string.IsNullOrEmpty(CreateError))
+                    {
+                        <div class="alert alert-danger py-1 small">@CreateError</div>
+                    }
+                    <button class="btn btn-success w-100 fw-bold py-2" @onclick="CreateRoleAsync">Create Role</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public EventCallback<string> OnLog { get; set; }
+    [Parameter] public EventCallback OnRolesChanged { get; set; }
+
+    private RbacDatabaseDto? Db;
+    private string SearchQuery = "";
+    private string SelectedUsername = "";
+    private bool IsSearching = false;
+    private List<TfsIdentitySearchResult> FoundIdentities = new();
+    private string SelectedRole = "Quality Reviewer";
+
+    private bool ShowCreateModal = false;
+    private string NewRoleName = "";
+    private string NewRoleDescription = "";
+    private List<string> NewRolePermissions = new();
+    private string CreateError = "";
+    private string TableFilter = "";
+
+    private List<UserRoleMapping> FilteredUserMappings =>
+        Db == null ? new() :
+        string.IsNullOrWhiteSpace(TableFilter) ? Db.UserMappings :
+        Db.UserMappings.Where(u => u.Username.Contains(TableFilter, StringComparison.OrdinalIgnoreCase) ||
+                                   u.Roles.Any(r => r.Contains(TableFilter, StringComparison.OrdinalIgnoreCase))).ToList();
+
+    public record PermItem(string Key, string Label);
+    public record PermCategory(string CategoryName, List<PermItem> Permissions);
+
+    private List<PermCategory> GroupedPermissions = new()
+    {
+        new("🛡️ PR Review Suite", new()
+        {
+            new("pr-engine", "PR Engine (Base & Export)"),
+            new("pr-wontfix-approve", "Won't Fix Approval"),
+            new("pr-approve", "Auto-Approve (+10 Vote)"),
+            new("pr-bypass-guard", "Allow & Export Anyway (Bypass)"),
+            new("pr-extract-discussions", "Extract Discussions")
+        }),
+        new("🛠️ Codebase Tools", new()
+        {
+            new("code-exporter", "Codebase Exporter & Reflector")
+        }),
+        new("📊 Data & Analytics", new()
+        {
+            new("db-excel", "Excel DB Extractor"),
+            new("reports", "Report Extractor")
+        }),
+        new("⚙️ Administration", new()
+        {
+            new("admin-roles", "Role & Access Manager")
+        })
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadDatabaseAsync();
+
+    private async Task LoadDatabaseAsync()
+    {
+        try { Db = await Http.GetFromJsonAsync<RbacDatabaseDto>("api/tfsbridge/rbac/database"); }
+        catch (Exception ex) { await OnLog.InvokeAsync($"❌ Could not load RBAC database: {ex.Message}"); }
+    }
+
+    private async Task RefreshAllAsync()
+    {
+        await LoadDatabaseAsync();
+        await OnRolesChanged.InvokeAsync();
+        await OnLog.InvokeAsync("✔ Refreshed database and updated user roles in navigation bar.");
+    }
+
+    private void SelectUserFromTable(string username)
+    {
+        SelectedUsername = username;
+        SearchQuery = username;
+        FoundIdentities.Clear();
+    }
+
+    private void ClearSelectedUser()
+    {
+        SelectedUsername = "";
+        SearchQuery = "";
+        FoundIdentities.Clear();
+    }
+
+    private async Task OnUserSearchInput(ChangeEventArgs e)
+    {
+        SearchQuery = e.Value?.ToString() ?? "";
+        SelectedUsername = SearchQuery;
+        FoundIdentities.Clear();
+
+        if (SearchQuery.Trim().Length >= 2)
+        {
+            IsSearching = true;
+            try
+            {
+                FoundIdentities = await Http.GetFromJsonAsync<List<TfsIdentitySearchResult>>(
+                    $"api/tfsbridge/identities/search?query={Uri.EscapeDataString(SearchQuery.Trim())}") ?? new();
+            }
+            catch (Exception ex) { await OnLog.InvokeAsync($"⚠️ Search notice: {ex.Message}"); }
+            finally { IsSearching = false; }
+        }
+    }
+
+    private void SelectIdentity(TfsIdentitySearchResult id)
+    {
+        SelectedUsername = id.AccountName;
+        SearchQuery = $"{id.DisplayName} ({id.AccountName})";
+        FoundIdentities.Clear();
+    }
+
+    private void TogglePermission(RoleDefinition role, string permKey, bool isChecked)
+    {
+        if (isChecked && !role.Permissions.Contains(permKey)) role.Permissions.Add(permKey);
+        else if (!isChecked && role.Permissions.Contains(permKey)) role.Permissions.Remove(permKey);
+    }
+
+    private void ToggleNewRolePermission(string permKey, bool isChecked)
+    {
+        if (isChecked && !NewRolePermissions.Contains(permKey)) NewRolePermissions.Add(permKey);
+        else if (!isChecked && NewRolePermissions.Contains(permKey)) NewRolePermissions.Remove(permKey);
+    }
+
+    private async Task CreateRoleAsync()
+    {
+        CreateError = "";
+        if (string.IsNullOrWhiteSpace(NewRoleName))
+        {
+            CreateError = "Role name cannot be empty.";
+            return;
+        }
+
+        var resp = await Http.PostAsJsonAsync("api/tfsbridge/rbac/roles/create", new CreateRoleRequest
+        {
+            Name = NewRoleName.Trim(),
+            Description = NewRoleDescription.Trim(),
+            Permissions = NewRolePermissions
+        });
+
+        if (resp.IsSuccessStatusCode)
+        {
+            await OnLog.InvokeAsync($"✔ Role '{NewRoleName}' created successfully.");
+            ShowCreateModal = false;
+            NewRoleName = "";
+            NewRoleDescription = "";
+            NewRolePermissions.Clear();
+            await LoadDatabaseAsync();
+            await OnRolesChanged.InvokeAsync();
+        }
+        else
+        {
+            CreateError = await resp.Content.ReadAsStringAsync();
+        }
+    }
+
+    private async Task DeleteRoleAsync(string roleName)
+    {
+        var resp = await Http.DeleteAsync($"api/tfsbridge/rbac/roles/{Uri.EscapeDataString(roleName)}");
+        var res = await resp.Content.ReadFromJsonAsync<OperationResponse<string>>();
+        await OnLog.InvokeAsync(res?.Data ?? "Role deleted.");
+        await LoadDatabaseAsync();
+        await OnRolesChanged.InvokeAsync();
+    }
+
+    private async Task SaveRolePermissions(RoleDefinition role)
+    {
+        var resp = await Http.PostAsJsonAsync("api/tfsbridge/rbac/roles/permissions", new UpdateRolePermissionsRequest
+        {
+            RoleName = role.Name,
+            Permissions = role.Permissions
+        });
+        var res = await resp.Content.ReadFromJsonAsync<OperationResponse<string>>();
+        await OnLog.InvokeAsync(res?.Data ?? "Saved.");
+        await OnRolesChanged.InvokeAsync();
+    }
+
+    private async Task AssignUserRoleAsync()
+    {
+        if (string.IsNullOrWhiteSpace(SelectedUsername)) return;
+        var resp = await Http.PostAsJsonAsync("api/tfsbridge/rbac/users/assign", new AssignUserRoleRequest
+        {
+            Username = SelectedUsername,
+            RoleName = SelectedRole
+        });
+        var res = await resp.Content.ReadFromJsonAsync<OperationResponse<string>>();
+        await OnLog.InvokeAsync(res?.Data ?? "Assigned.");
+        await LoadDatabaseAsync();
+        await OnRolesChanged.InvokeAsync();
+    }
+
+    private async Task UnassignRole(string username, string roleName)
+    {
+        var resp = await Http.PostAsJsonAsync("api/tfsbridge/rbac/users/unassign", new AssignUserRoleRequest
+        {
+            Username = username,
+            RoleName = roleName
+        });
+        var res = await resp.Content.ReadFromJsonAsync<OperationResponse<string>>();
+        await OnLog.InvokeAsync(res?.Data ?? "Removed.");
+        await LoadDatabaseAsync();
+        await OnRolesChanged.InvokeAsync();
+    }
+}

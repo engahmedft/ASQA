@@ -1,0 +1,377 @@
+@using System.Text.Json
+@using ASQATools.Shared.Models
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<ul class="nav nav-pills mb-3 p-1 bg-light rounded border">
+    <li class="nav-item">
+        <button class="nav-link py-1 px-3 fw-bold @(SubTab == "export" ? "active" : "text-dark")"
+                @onclick='() => SubTab = "export"'>📦 Export Project (GitIngest Format)</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link py-1 px-3 fw-bold @(SubTab == "reflector" ? "active bg-success text-white" : "text-dark")"
+                @onclick='() => SubTab = "reflector"'>📥 Apply Git Diffs (Reflector)</button>
+    </li>
+</ul>
+
+@if (SubTab == "export")
+{
+    <div class="row g-3 mb-3">
+        <div class="col-md-6">
+            <div class="card shadow-sm p-3 bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <h5 class="fw-bold mb-3 text-dark">📦 GitIngest Project Exporter</h5>
+                <div class="mb-3">
+                    <label class="form-label fw-bold text-dark">Directory Path to Export (Auto-detected):</label>
+                    <div class="input-group">
+                        <input type="text" class="form-control font-monospace" @bind="ExportDirPath" style="background: #f8fafc; border: 1px solid #cbd5e1;" />
+                        <button class="btn btn-outline-primary fw-bold" @onclick="ScanRootTreeAsync" disabled="@IsScanningTree">
+                            @(IsScanningTree ? "Scanning..." : "📁 Scan & Pick Files/Folders")
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Vertical Stacked Exclusions -->
+                <div class="card p-3 mb-3 bg-light border-0 rounded-3">
+                    <div class="mb-3">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="exStandardArtifacts" @bind="ExcludeStandardArtifacts" />
+                            <label class="form-check-label fw-bold text-dark" for="exStandardArtifacts" style="cursor: pointer;">
+                                🛡️ Exclude Standard Artifacts & Folders
+                            </label>
+                            <div class="small text-muted">
+                                Automatically ignores <code>publish/</code>, <code>node_modules/</code>, <code>.git/</code>, <code>.vs/</code>, <code>bin/</code>, <code>obj/</code>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pt-2 border-top">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="lineNoCheck" @bind="ExportWithLineNumbers" />
+                            <label class="form-check-label small fw-bold text-dark" for="lineNoCheck" style="cursor: pointer;">
+                                Include line numbers (e.g. <code>1 | code</code>)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- On-Demand Recursive Lazy Tree -->
+                @if (TreeRootNodes.Count > 0)
+                {
+                    <div class="card p-3 mb-3 border shadow-sm">
+                        <div class="d-flex justify-content-between align-items-center mb-2 pb-1 border-bottom">
+                            <span class="small fw-bold text-dark text-uppercase">
+                                📂 Target Tree Selection (Click ▶ to Expand Folders Dynamically)
+                            </span>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-link btn-sm p-0 text-decoration-none small" @onclick="() => ToggleAllTree(true)">Select All</button>
+                                <span class="text-muted">|</span>
+                                <button class="btn btn-link btn-sm p-0 text-decoration-none small" @onclick="() => ToggleAllTree(false)">Deselect All</button>
+                            </div>
+                        </div>
+                        <div class="overflow-auto font-monospace" style="max-height: 280px;">
+                            @foreach (var node in TreeRootNodes)
+                            {
+                                <CodebaseTreeNode Node="node" Level="0" OnToggleSelect="StateHasChanged" OnLoadChildren="LoadChildrenAsync" />
+                            }
+                        </div>
+                    </div>
+                }
+
+                <button class="btn btn-primary w-100 py-2 fw-bold" @onclick="ExecuteCodebaseExportAsync" disabled="@IsProcessing">
+                    @(IsProcessing ? "Scanning & Packaging..." : "🚀 Export in GitIngest Format")
+                </button>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card shadow-sm p-3 h-100 d-flex flex-column justify-content-between bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div>
+                    <h5 class="fw-bold mb-3 text-dark">📊 Bundle Metrics</h5>
+                    @if (LastExportResult != null)
+                    {
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item bg-transparent d-flex justify-content-between">
+                                <span class="text-secondary fw-semibold">Total Files:</span>
+                                <strong class="text-primary">@LastExportResult.TotalFiles</strong>
+                            </li>
+                            <li class="list-group-item bg-transparent d-flex justify-content-between">
+                                <span class="text-secondary fw-semibold">Total Lines:</span>
+                                <strong class="text-success">@LastExportResult.TotalLines.ToString("N0")</strong>
+                            </li>
+                            <li class="list-group-item bg-transparent d-flex justify-content-between">
+                                <span class="text-secondary fw-semibold">Estimated Tokens:</span>
+                                <strong class="text-warning">~@LastExportResult.EstimatedTokens.ToString("N0")</strong>
+                            </li>
+                        </ul>
+                    }
+                    else { <p class="text-muted">Click <strong>Export in GitIngest Format</strong> to package the codebase.</p> }
+                </div>
+                @if (LastExportResult != null)
+                {
+                    <button class="btn btn-success w-100 py-2 fw-bold" @onclick="CopyExportResultToClipboardAsync">
+                        📋 Copy Codebase Bundle to Clipboard
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-3">
+        <div class="col-md-7">
+            <div class="card shadow-sm p-3 bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label fw-bold mb-0 text-dark">Paste AI Response (Git Unified Diff / File Blocks):</label>
+                    <button class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" @onclick="PasteAiReflectorResponseAsync">
+                        📋 Paste from Clipboard
+                    </button>
+                </div>
+                <textarea class="form-control font-monospace" rows="18" @bind="AiReflectorInput"
+                          style="background: #f8fafc; font-size: 0.88rem;"
+                          placeholder="Paste Git unified diffs (diff --git a/... b/...), search/replace blocks, or full file blocks..."></textarea>
+            </div>
+        </div>
+        <div class="col-md-5">
+            <div class="card shadow-sm p-3 h-100 d-flex flex-column justify-content-between bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div>
+                    <h5 class="fw-bold mb-2 text-dark">📥 Reflector Target Directory</h5>
+                    <input type="text" class="form-control font-monospace mb-3" @bind="ExportDirPath" />
+                    
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="backupCheck" @bind="CreateBackupsOnApply" />
+                            <label class="form-check-label fw-bold text-dark" for="backupCheck">Create <code>.bak</code> Backups</label>
+                        </div>
+                        <button class="btn btn-sm btn-outline-danger fw-bold py-0 px-2" @onclick="PurgeAllBackupsAsync">
+                            🧹 Purge All .bak Files
+                        </button>
+                    </div>
+
+                    <button class="btn btn-outline-primary w-100 py-2 fw-bold mb-3" @onclick="PreviewAiChangesAsync">
+                        🔍 Preview & Validate Diff Hunks
+                    </button>
+                    @if (ParsedReflectorResult != null)
+                    {
+                        <div class="card p-2 bg-light mb-3" style="max-height: 220px; overflow-y: auto;">
+                            <h6 class="fw-bold small text-uppercase mb-2">Detected @ParsedReflectorResult.Files.Count File Patch(es):</h6>
+                            @foreach (var f in ParsedReflectorResult.Files)
+                            {
+                                <div class="small d-flex justify-content-between py-1 border-bottom">
+                                    <span class="text-truncate font-monospace" style="max-width: 65%;">@f.RelativePath</span>
+                                    <span class="badge @(f.ChangeType.Contains("Git") ? "bg-info text-dark" : "bg-warning text-dark")">@f.ChangeType</span>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                <button class="btn btn-success w-100 py-3 fw-bold shadow-sm" @onclick="ApplyAiChangesToDiskAsync" disabled="@IsProcessing">
+                    @(IsProcessing ? "Applying to Files on Disk..." : "🚀 Apply Diffs Directly to Files on Disk")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public AuthStatusResponse? AuthStatus { get; set; }
+    [Parameter] public EventCallback<string> OnLog { get; set; }
+
+    private string SubTab = "export";
+    private string ExportDirPath = "";
+    private bool ExportWithLineNumbers = true;
+    private bool ExcludeStandardArtifacts = true;
+    private bool IsScanningTree = false;
+    private bool IsProcessing = false;
+    private List<TreeNodeItemDto> TreeRootNodes = new();
+    private CodebaseExportResult? LastExportResult;
+
+    private string AiReflectorInput = "";
+    private bool CreateBackupsOnApply = true;
+    private CodeReflectorParseResult? ParsedReflectorResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var def = await Http.GetFromJsonAsync<JsonElement>("api/tfsbridge/default-directory");
+            if (def.TryGetProperty("directory", out var d)) ExportDirPath = d.GetString() ?? "";
+        }
+        catch { }
+    }
+
+    private async Task LogAsync(string msg) => await OnLog.InvokeAsync(msg);
+
+    private async Task ScanRootTreeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ExportDirPath)) return;
+        IsScanningTree = true;
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/scan-tree-children", new ScanTreeChildrenRequest { RootPath = ExportDirPath });
+            if (resp.IsSuccessStatusCode)
+            {
+                TreeRootNodes = await resp.Content.ReadFromJsonAsync<List<TreeNodeItemDto>>() ?? new();
+                await LogAsync($"📁 Scanned {TreeRootNodes.Count} root item(s). Click ▶ to expand subdirectories dynamically.");
+            }
+        }
+        catch (Exception ex) { await LogAsync($"⚠️ Scan notice: {ex.Message}"); }
+        finally { IsScanningTree = false; }
+    }
+
+    private async Task LoadChildrenAsync(TreeNodeItemDto parentNode)
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/scan-tree-children", new ScanTreeChildrenRequest 
+            { 
+                RootPath = ExportDirPath, 
+                SubPath = parentNode.RelativePath 
+            });
+            if (resp.IsSuccessStatusCode)
+            {
+                var children = await resp.Content.ReadFromJsonAsync<List<TreeNodeItemDto>>() ?? new();
+                foreach (var c in children) c.IsSelected = parentNode.IsSelected;
+                parentNode.Children = children;
+                StateHasChanged();
+            }
+        }
+        catch { }
+    }
+
+    private void ToggleAllTree(bool selected)
+    {
+        foreach (var node in TreeRootNodes) SetSelectionRecursive(node, selected);
+    }
+
+    private void SetSelectionRecursive(TreeNodeItemDto node, bool selected)
+    {
+        node.IsSelected = selected;
+        foreach (var child in node.Children) SetSelectionRecursive(child, selected);
+    }
+
+    private async Task ExecuteCodebaseExportAsync()
+    {
+        IsProcessing = true;
+        await LogAsync("=== Initiating GitIngest Codebase Export ===");
+
+        try
+        {
+            var excludedPaths = new List<string>();
+            var includedPaths = new List<string>();
+
+            if (TreeRootNodes.Count > 0)
+            {
+                GatherSelectionFilters(TreeRootNodes, includedPaths, excludedPaths);
+            }
+
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/export-codebase", new CodebaseExportRequest
+            {
+                RootPath = ExportDirPath,
+                IncludeLineNumbers = ExportWithLineNumbers,
+                ExcludeStandardArtifacts = ExcludeStandardArtifacts,
+                IncludedPaths = includedPaths.Count > 0 ? includedPaths : null,
+                ExcludedPaths = excludedPaths.Count > 0 ? excludedPaths : null
+            });
+
+            var result = await resp.Content.ReadFromJsonAsync<OperationResponse<CodebaseExportResult>>();
+            if (result?.Logs != null) foreach (var l in result.Logs) await LogAsync(l);
+            if (result?.Success == true && result.Data != null)
+            {
+                LastExportResult = result.Data;
+                await JS.InvokeAsync<bool>("copyTextToClipboard", LastExportResult.BundleText);
+                await LogAsync("✔ Full GitIngest codebase bundle copied to clipboard automatically!");
+            }
+        }
+        catch (Exception ex) { await LogAsync($"❌ Export error: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+
+    private void GatherSelectionFilters(List<TreeNodeItemDto> nodes, List<string> included, List<string> excluded)
+    {
+        foreach (var node in nodes)
+        {
+            if (!node.IsSelected)
+            {
+                excluded.Add(node.RelativePath);
+            }
+            else
+            {
+                if (node.Children != null && node.Children.Count > 0)
+                {
+                    GatherSelectionFilters(node.Children, included, excluded);
+                }
+                else
+                {
+                    included.Add(node.RelativePath);
+                }
+            }
+        }
+    }
+
+    private async Task PurgeAllBackupsAsync()
+    {
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/purge-backups", new CodebaseExportRequest { RootPath = ExportDirPath });
+            var res = await resp.Content.ReadFromJsonAsync<OperationResponse<int>>();
+            if (res?.Logs != null) foreach (var l in res.Logs) await LogAsync(l);
+            if (res?.Success == true) await LogAsync($"✔ Purge complete: {res.Data} .bak file(s) deleted.");
+        }
+        catch (Exception ex)
+        {
+            await LogAsync($"❌ Error purging backups: {ex.Message}");
+        }
+    }
+
+    private async Task CopyExportResultToClipboardAsync()
+    {
+        if (LastExportResult == null) return;
+        await JS.InvokeAsync<bool>("copyTextToClipboard", LastExportResult.BundleText);
+        await LogAsync("✔ Codebase bundle re-copied to clipboard!");
+    }
+
+    private async Task PasteAiReflectorResponseAsync()
+    {
+        try
+        {
+            AiReflectorInput = await JS.InvokeAsync<string>("readTextFromClipboard");
+            await LogAsync("✔ Pasted Git diff from clipboard.");
+            await PreviewAiChangesAsync();
+        }
+        catch (Exception ex) { await LogAsync($"❌ Clipboard read error: {ex.Message}"); }
+    }
+
+    private async Task PreviewAiChangesAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AiReflectorInput)) return;
+        var resp = await Http.PostAsJsonAsync("api/tfsbridge/reflector-parse", new CodeReflectorApplyRequest
+        {
+            TargetDirectory = ExportDirPath, RawAiResponse = AiReflectorInput
+        });
+
+        if (resp.IsSuccessStatusCode)
+        {
+            ParsedReflectorResult = await resp.Content.ReadFromJsonAsync<CodeReflectorParseResult>();
+            await LogAsync($"🔍 Scan completed: Found {ParsedReflectorResult?.Files.Count ?? 0} file change(s) across {ParsedReflectorResult?.TotalHunks ?? 0} hunk(s).");
+        }
+    }
+
+    private async Task ApplyAiChangesToDiskAsync()
+    {
+        if (string.IsNullOrWhiteSpace(AiReflectorInput)) return;
+        IsProcessing = true;
+        await LogAsync("=== Applying Git Diffs Directly to Files on Disk ===");
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/reflector-apply", new CodeReflectorApplyRequest
+            {
+                TargetDirectory = ExportDirPath, RawAiResponse = AiReflectorInput, CreateBackups = CreateBackupsOnApply
+            });
+
+            var res = await resp.Content.ReadFromJsonAsync<OperationResponse<int>>();
+            if (res?.Logs != null) foreach (var l in res.Logs) await LogAsync(l);
+        }
+        catch (Exception ex) { await LogAsync($"❌ Error applying changes: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+}

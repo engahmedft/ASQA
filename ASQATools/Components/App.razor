@@ -1,0 +1,28 @@
+@using ASQATools.Components.Layout
+@inject IHttpContextAccessor HttpContextAccessor
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    @{
+        var pathBase = HttpContextAccessor.HttpContext?.Request.PathBase.Value;
+        var baseHref = string.IsNullOrEmpty(pathBase) ? "/" : pathBase.TrimEnd('/') + "/";
+    }
+    <base href="@baseHref" />
+    <!-- Local Offline Bootstrap -->
+    <link rel="stylesheet" href="css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="ASQATools.styles.css" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="js/fileSaver.js"></script>
+</body>
+
+</html>

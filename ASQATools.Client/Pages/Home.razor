@@ -1,0 +1,150 @@
+@page "/"
+@rendermode @(new InteractiveWebAssemblyRenderMode(prerender: false))
+@using ASQATools.Shared.Models
+@using ASQATools.Client.Components.Common
+@using ASQATools.Client.Components.Admin
+@using ASQATools.Client.Components.PrEngine
+@using ASQATools.Client.Components.Codebase
+@inject HttpClient Http
+
+<AppNavBar @bind-CurrentTool="CurrentTool"
+           AuthStatus="AuthStatus"
+           OnLogout="LogoutAsync"
+           OnShowLogin="() => ShowLoginModal = true" />
+
+<div class="container-fluid mt-3 px-3">
+    @if (AuthStatus?.IsAuthenticated != true)
+    {
+        <div class="card p-5 text-center shadow-sm bg-white my-5 mx-auto" style="max-width: 620px; border: 1px solid #cbd5e1 !important;">
+            <div class="display-3 mb-3">🔒</div>
+            <h4 class="fw-bold text-dark mb-2">Authentication Required</h4>
+            <p class="text-muted mb-4">Please sign in with your TFS Active Directory domain account to access tools and pull requests.</p>
+            <button class="btn btn-primary fw-bold px-4 py-2" @onclick="() => ShowLoginModal = true">
+                🔑 Sign in to TFS (Domain)
+            </button>
+        </div>
+    }
+    else
+    {
+        @if (CurrentTool == "pr-engine" && HasPermission("pr-engine"))
+        {
+            <PrReviewEngine AuthStatus="AuthStatus" OnLog="AddLog" />
+        }
+        else if (CurrentTool == "code-exporter" && HasPermission("code-exporter"))
+        {
+            <CodebaseTools AuthStatus="AuthStatus" OnLog="AddLog" />
+        }
+        else if (CurrentTool == "admin-roles" && HasPermission("admin-roles"))
+        {
+            <RoleManagement OnLog="AddLog" OnRolesChanged="ReloadAuthStatusAsync" />
+        }
+        else if (CurrentTool == "db-excel" && HasPermission("db-excel"))
+        {
+            <div class="card p-5 text-center shadow-sm border bg-white"><h4 class="text-dark">📊 Excel Database Extractor</h4><p class="text-muted">Module ready.</p></div>
+        }
+        else if (CurrentTool == "reports" && HasPermission("reports"))
+        {
+            <div class="card p-5 text-center shadow-sm border bg-white"><h4 class="text-dark">📑 Report Extractor</h4><p class="text-muted">Module ready.</p></div>
+        }
+        else
+        {
+            <div class="card p-5 text-center shadow-sm bg-white my-5 mx-auto" style="max-width: 620px; border: 1px solid #cbd5e1 !important;">
+                <div class="display-4 mb-2">🚫</div>
+                <h5 class="fw-bold text-dark mb-2">Access Restricted</h5>
+                <p class="text-muted mb-0">You do not have permission to access this tool. Please select a permitted tool above or contact your administrator.</p>
+            </div>
+        }
+    }
+
+    <!-- Shared Live Console -->
+    <LiveConsole Logs="Logs" OnClear="() => Logs.Clear()" />
+</div>
+
+<LoginModal Show="ShowLoginModal"
+            OnClose="() => ShowLoginModal = false"
+            OnSubmit="PerformLoginAsync"
+            Error="@LoginError" />
+
+@code {
+    private string CurrentTool = "pr-engine";
+    private AuthStatusResponse? AuthStatus;
+    private bool ShowLoginModal = false;
+    private string LoginError = "";
+    private List<LiveConsole.TerminalLog> Logs = new();
+
+    protected override async Task OnInitializedAsync() => await ReloadAuthStatusAsync();
+
+    private async Task ReloadAuthStatusAsync()
+    {
+        try
+        {
+            var res = await Http.GetFromJsonAsync<AuthStatusResponse>("api/tfsbridge/auth-status");
+            if (res != null)
+            {
+                res.Roles ??= new();
+                res.Permissions ??= new();
+                AuthStatus = res;
+                EnsureValidCurrentTool();
+                StateHasChanged();
+            }
+        }
+        catch { }
+    }
+
+    private bool HasPermission(string key)
+    {
+        if (AuthStatus?.IsAuthenticated != true) return false;
+        if (AuthStatus.Permissions == null) return false;
+        if (AuthStatus.Permissions.Count == 0 && AuthStatus.Roles != null && AuthStatus.Roles.Contains("Admin"))
+            return key == "admin-roles";
+        return AuthStatus.Permissions.Contains(key, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void EnsureValidCurrentTool()
+    {
+        if (AuthStatus?.IsAuthenticated != true) return;
+        if (!HasPermission(CurrentTool))
+        {
+            if (HasPermission("pr-engine")) CurrentTool = "pr-engine";
+            else if (HasPermission("code-exporter")) CurrentTool = "code-exporter";
+            else if (HasPermission("admin-roles")) CurrentTool = "admin-roles";
+            else if (HasPermission("db-excel")) CurrentTool = "db-excel";
+            else if (HasPermission("reports")) CurrentTool = "reports";
+            else CurrentTool = "";
+        }
+    }
+
+    private void AddLog(string msg) => Logs.Add(new LiveConsole.TerminalLog(DateTime.Now, msg));
+
+    private async Task PerformLoginAsync(DomainLoginRequest req)
+    {
+        LoginError = "";
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/login", req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var res = await resp.Content.ReadFromJsonAsync<AuthStatusResponse>();
+                if (res != null)
+                {
+                    res.Roles ??= new();
+                    res.Permissions ??= new();
+                    AuthStatus = res;
+                    EnsureValidCurrentTool();
+                }
+                ShowLoginModal = false;
+                AddLog($"✔ Authenticated as {AuthStatus?.DisplayName} against http://tfs (Roles: {string.Join(", ", AuthStatus?.Roles ?? new())})");
+            }
+            else { LoginError = "Authentication failed. Check your domain credentials."; }
+        }
+        catch (Exception ex) { LoginError = ex.Message; }
+    }
+
+    private async Task LogoutAsync()
+    {
+        try { await Http.PostAsync("api/tfsbridge/logout", null); } catch { }
+        AuthStatus = new AuthStatusResponse { IsAuthenticated = false, Roles = new(), Permissions = new() };
+        CurrentTool = "pr-engine";
+        AddLog("✔ Signed out from TFS session. All session and review data purged.");
+    }
+}

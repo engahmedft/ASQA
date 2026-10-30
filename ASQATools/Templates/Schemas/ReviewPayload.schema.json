@@ -1,0 +1,72 @@
+{
+"$schema": "http://json-schema.org/draft-07/schema#",
+"title": "AiReviewPayload",
+"type": "object",
+"required": ["metadata", "summary_markdown", "resolved_threads", "inline_comments"],
+"additionalProperties": false,
+"properties": {
+"metadata": {
+"type": "object",
+"required": [
+"pr_id", "title", "repository", "server_url", "collection",
+"project", "pr_api_url", "repo_api_url", "feature_branch",
+"target_branch", "verdict", "export_date", "export_timestamp"
+],
+"properties": {
+"pr_id": { "type": "string" },
+"title": { "type": "string" },
+"repository": { "type": "string" },
+"server_url": { "type": "string" },
+"collection": { "type": "string" },
+"project": { "type": "string" },
+"pr_api_url": { "type": "string" },
+"repo_api_url": { "type": "string" },
+"feature_branch": { "type": "string" },
+"target_branch": { "type": "string" },
+"verdict": { "type": "string", "enum": ["APPROVE", "CHANGES_REQUESTED"] },
+"export_date": { "type": "string" },
+"export_timestamp": { "type": "string" }
+}
+},
+"summary_markdown": {
+"type": "string",
+"description": "Rich markdown text starting with '### 📋 Executive Summary' followed immediately by '### 🔍 Findings Summary Table'."
+},
+"resolved_threads": {
+"type": "array",
+"items": {
+"type": "object",
+"required": ["thread_id", "verdict", "explanation"],
+"properties": {
+"thread_id": { "type": "integer" },
+"file_path": { "type": "string" },
+"verdict": { "type": "string", "enum": ["RESOLVED", "STILL_BROKEN"] },
+"explanation": { "type": "string" }
+}
+}
+},
+"inline_comments": {
+"type": "array",
+"items": {
+"type": "object",
+"required": ["file_path", "line", "tag", "comment"],
+"properties": {
+"file_path": { "type": "string" },
+"line": { "type": "integer" },
+"tag": {
+"type": "string",
+"enum": [
+"[NEW CRITICAL]",
+"[NEW MEDIUM]",
+"[NEW LOW]",
+"[PRE-EXISTING CRITICAL]",
+"[PRE-EXISTING MEDIUM]",
+"[PRE-EXISTING LOW]"
+]
+},
+"comment": { "type": "string" }
+}
+}
+}
+}
+}

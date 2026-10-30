@@ -1,0 +1,78 @@
+@using ASQATools.Shared.Models
+
+<div class="tree-node" style="padding-left: @(Level * 18)px;">
+    <div class="d-flex align-items-center py-1 border-bottom border-light hover-bg">
+        @if (Node.IsDirectory)
+        {
+            <button type="button" class="btn btn-link btn-sm p-0 me-1 text-decoration-none text-secondary" 
+                    style="width: 16px; font-size: 0.72rem;" 
+                    @onclick="ToggleExpand">
+                @(Node.IsExpanded ? "▼" : "▶")
+            </button>
+        }
+        else
+        {
+            <span class="d-inline-block me-1" style="width: 16px;"></span>
+        }
+
+        <input class="form-check-input me-2 mt-0" type="checkbox" id="@($"tree_{Node.RelativePath.Replace('/', '_')}")"
+               checked="@Node.IsSelected"
+               @onchange="OnCheckChanged" />
+
+        <label class="form-check-label font-monospace small mb-0 d-flex align-items-center gap-1 text-truncate" 
+               for="@($"tree_{Node.RelativePath.Replace('/', '_')}")" style="cursor: pointer; max-width: 75%;">
+            <span>@(Node.IsDirectory ? (Node.IsExpanded ? "📂" : "📁") : "📄")</span>
+            <span class="@(Node.IsDirectory ? "fw-bold text-dark" : "text-secondary")">@Node.Name</span>
+        </label>
+
+        @if (Node.IsDefaultExcluded)
+        {
+            <span class="badge bg-secondary-subtle text-secondary ms-auto" style="font-size: 0.65rem;">Default Excluded</span>
+        }
+    </div>
+
+    @if (Node.IsDirectory && Node.IsExpanded && Node.Children != null)
+    {
+        @foreach (var child in Node.Children)
+        {
+            <CodebaseTreeNode Node="child" Level="@(Level + 1)" OnToggleSelect="OnChildToggle" OnLoadChildren="OnLoadChildren" />
+        }
+    }
+</div>
+
+@code {
+    [Parameter] public TreeNodeItemDto Node { get; set; } = new();
+    [Parameter] public int Level { get; set; } = 0;
+    [Parameter] public EventCallback<TreeNodeItemDto> OnToggleSelect { get; set; }
+    [Parameter] public EventCallback<TreeNodeItemDto> OnLoadChildren { get; set; }
+
+    private async Task ToggleExpand()
+    {
+        Node.IsExpanded = !Node.IsExpanded;
+        if (Node.IsExpanded && (Node.Children == null || Node.Children.Count == 0))
+        {
+            await OnLoadChildren.InvokeAsync(Node);
+        }
+    }
+
+    private async Task OnCheckChanged(ChangeEventArgs e)
+    {
+        bool val = (bool)(e.Value ?? false);
+        SetSelectionRecursive(Node, val);
+        await OnToggleSelect.InvokeAsync(Node);
+    }
+
+    private void SetSelectionRecursive(TreeNodeItemDto node, bool selected)
+    {
+        node.IsSelected = selected;
+        foreach (var child in node.Children)
+        {
+            SetSelectionRecursive(child, selected);
+        }
+    }
+
+    private async Task OnChildToggle(TreeNodeItemDto child)
+    {
+        await OnToggleSelect.InvokeAsync(child);
+    }
+}

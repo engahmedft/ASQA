@@ -1,0 +1,93 @@
+@using ASQATools.Shared.Models
+
+<nav class="navbar navbar-expand-lg navbar-dark bg-dark px-3 py-2 shadow-sm border-bottom border-dark-subtle">
+    <div class="container-fluid px-0">
+        <div class="d-flex align-items-center me-3">
+            <span class="navbar-brand fw-bold mb-0 fs-6 d-flex align-items-center gap-2">
+                <span class="badge bg-primary px-2 py-1">ASQA</span>
+                <span>Engineering Suite</span>
+            </span>
+        </div>
+        <div class="collapse navbar-collapse d-flex justify-content-between">
+            <div class="d-flex flex-wrap gap-1 align-items-center">
+                @if (AuthStatus?.IsAuthenticated == true)
+                {
+                    @if (HasPermission("pr-engine"))
+                    {
+                        <button class="btn btn-sm @(CurrentTool == "pr-engine" ? "btn-primary text-white fw-bold shadow-sm" : "btn-outline-secondary text-light border-0")"
+                                @onclick='() => SetTool("pr-engine")'>
+                            🛡️ PR Review Engine
+                        </button>
+                    }
+                    @if (HasPermission("code-exporter"))
+                    {
+                        <button class="btn btn-sm @(CurrentTool == "code-exporter" ? "btn-primary text-white fw-bold shadow-sm" : "btn-outline-secondary text-light border-0")"
+                                @onclick='() => SetTool("code-exporter")'>
+                            📦 Codebase Exporter & Reflector
+                        </button>
+                    }
+                    @if (HasPermission("db-excel"))
+                    {
+                        <button class="btn btn-sm @(CurrentTool == "db-excel" ? "btn-primary text-white fw-bold shadow-sm" : "btn-outline-secondary text-light border-0")"
+                                @onclick='() => SetTool("db-excel")'>
+                            📊 Excel DB Extractor
+                        </button>
+                    }
+                    @if (HasPermission("reports"))
+                    {
+                        <button class="btn btn-sm @(CurrentTool == "reports" ? "btn-primary text-white fw-bold shadow-sm" : "btn-outline-secondary text-light border-0")"
+                                @onclick='() => SetTool("reports")'>
+                            📑 Report Extractor
+                        </button>
+                    }
+                    @if (HasPermission("admin-roles"))
+                    {
+                        <button class="btn btn-sm @(CurrentTool == "admin-roles" ? "btn-warning text-dark fw-bold shadow-sm" : "btn-outline-warning border-0")"
+                                @onclick='() => SetTool("admin-roles")'>
+                            ⚙️ Role & Access Manager
+                        </button>
+                    }
+                }
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                @if (AuthStatus?.IsAuthenticated == true)
+                {
+                    <span class="badge bg-success p-2">👤 @(string.IsNullOrWhiteSpace(AuthStatus.DisplayName) ? AuthStatus.Username : AuthStatus.DisplayName)</span>
+                    @if (AuthStatus.Roles != null && AuthStatus.Roles.Count > 0)
+                    {
+                        <span class="badge bg-secondary">@string.Join(", ", AuthStatus.Roles)</span>
+                    }
+                    <button class="btn btn-sm btn-outline-danger" @onclick="OnLogout">Sign Out</button>
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-primary fw-bold" @onclick="OnShowLogin">
+                        🔑 Sign in to TFS (Domain)
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+</nav>
+
+@code {
+    [Parameter] public string CurrentTool { get; set; } = "pr-engine";
+    [Parameter] public EventCallback<string> CurrentToolChanged { get; set; }
+    [Parameter] public AuthStatusResponse? AuthStatus { get; set; }
+    [Parameter] public EventCallback OnLogout { get; set; }
+    [Parameter] public EventCallback OnShowLogin { get; set; }
+
+    private bool HasPermission(string key)
+    {
+        if (AuthStatus?.IsAuthenticated != true) return false;
+        if (AuthStatus.Permissions == null) return false;
+        if (AuthStatus.Permissions.Count == 0 && (AuthStatus.Roles?.Contains("Admin") == true)) return key == "admin-roles";
+        return AuthStatus.Permissions.Contains(key, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private async Task SetTool(string tool)
+    {
+        CurrentTool = tool;
+        await CurrentToolChanged.InvokeAsync(tool);
+    }
+}

@@ -1,0 +1,43 @@
+## Build results
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+publish/
+publish_temp/
+
+## ASQA Runtime Review Data & Storage
+pr_reviews_data/
+
+## Visual Studio & VS Code & JetBrains
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+.idea/
+*.suo
+*.user
+*.userosv
+*.sln.docstates
+
+## User-specific / Local Configuration
+appsettings*.local.json
+appsettings.Secrets.json
+*.local.json
+
+## Test Results & Coverage
+[Tt]est[Rr]esult*/
+coverage/
+*.coverage
+
+## OS generated files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+## Crash dumps
+*.dmp
+*.dump
+createdump.exe

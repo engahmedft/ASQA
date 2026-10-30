@@ -1,0 +1,523 @@
+@using System.Text.Json
+@using ASQATools.Shared.Models
+@inject HttpClient Http
+@inject IJSRuntime JS
+
+<!-- Optional PAT Card -->
+<div class="card shadow-sm p-3 mb-3 bg-white" style="border: 1px solid #cbd5e1 !important;">
+    <div class="row align-items-center">
+        <div class="col-md-3">
+            <label class="form-label fw-bold mb-0 text-dark">🔑 Personal Access Token (PAT):</label>
+            <div class="small text-muted">Shared fallback across all PR modes below</div>
+        </div>
+        <div class="col-md-9">
+            <input type="password" class="form-control" @bind="PatToken"
+                   style="background: #f8fafc; border: 1px solid #cbd5e1;"
+                   placeholder="Leave empty for Windows / Domain credentials..." />
+        </div>
+    </div>
+</div>
+
+<!-- PR Engine Tabs -->
+<ul class="nav nav-tabs mb-3 border-bottom" style="border-color: #cbd5e1 !important;">
+    <li class="nav-item">
+        <button class="nav-link @(ActiveTab == "export" ? "active fw-bold text-primary border-bottom-0" : "text-secondary")"
+                @onclick='() => ActiveTab = "export"'>📦 Mode 1: Export Bundle</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(ActiveTab == "reflect" ? "active fw-bold text-success border-bottom-0" : "text-secondary")"
+                @onclick='() => ActiveTab = "reflect"'>🚀 Mode 2: Reflect Review</button>
+    </li>
+    <li class="nav-item">
+        <button class="nav-link @(ActiveTab == "clear" ? "active fw-bold text-danger border-bottom-0" : "text-secondary")"
+                @onclick='() => ActiveTab = "clear"'>🧹 Mode 3: Reset / Clear</button>
+    </li>
+    @if (HasPermission("pr-extract-discussions"))
+    {
+        <li class="nav-item">
+            <button class="nav-link @(ActiveTab == "threads" ? "active fw-bold text-info border-bottom-0" : "text-secondary")"
+                    @onclick='() => ActiveTab = "threads"'>💬 Mode 4: Extract Discussions</button>
+        </li>
+    }
+</ul>
+
+<div class="row g-3 mb-3">
+    @if (ActiveTab == "export")
+    {
+        <div class="col-md-5">
+            <div class="card h-100 p-3 d-flex flex-column justify-content-between rounded-3 shadow-sm bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom">
+                        <h6 class="fw-bold mb-0 text-dark">📦 Bundle Configuration</h6>
+                        <span class="badge @(LastExportBundle != null ? (LastExportBundle.PreflightAlert?.IsBlocked == true ? "bg-warning text-dark" : "bg-success") : "bg-secondary")">
+                            @(LastExportBundle != null ? (LastExportBundle.PreflightAlert?.IsBlocked == true ? "Pre-flight Guard" : "Bundle Ready") : "Awaiting Input")
+                        </span>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-bold text-dark small text-uppercase">Pull Request Full URL:</label>
+                        <input type="text" class="form-control" @bind="PrInput" style="background: #f8fafc; border: 1px solid #cbd5e1;" 
+                               placeholder="Enter the full URL of the pull request" />
+                    </div>
+                    <div class="p-3 rounded mb-3" style="background: #f8fafc; border: 1px solid #e2e8f0;">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="diffOnlySwitch" @bind="ExportDiffOnly" />
+                            <label class="form-check-label fw-bold text-dark" for="diffOnlySwitch" style="cursor: pointer;">
+                                ⚡ Only Bundle Diffs with Context
+                            </label>
+                        </div>
+                        @if (ExportDiffOnly)
+                        {
+                            <div class="d-flex align-items-center justify-content-between pt-2 mt-2 border-top">
+                                <span class="small fw-semibold text-secondary">Surrounding Context:</span>
+                                <div class="d-flex align-items-center gap-1">
+                                    <input type="number" class="form-control form-control-sm text-center font-monospace" style="width: 70px;" min="2" max="50" @bind="DiffContextLines" />
+                                    <span class="small text-muted">lines</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+                <button class="btn btn-primary w-100 py-3 fw-bold shadow-sm" @onclick="() => ExecuteExportAsync(false)" disabled="@IsProcessing">
+                    @(IsProcessing ? "Validating & Generating..." : "📦 Generate AI Bundle File")
+                </button>
+            </div>
+        </div>
+
+        <div class="col-md-7">
+            <div class="card h-100 p-3 rounded-3 shadow-sm bg-white d-flex flex-column justify-content-between" style="border: 1px solid #cbd5e1 !important;">
+                <div>
+                    <div class="d-flex justify-content-between align-items-center mb-3 border-bottom pb-2">
+                        <h6 class="fw-bold mb-0 text-dark">📊 Bundle Telemetry & Status</h6>
+                        @if (LastExportBundle != null && LastExportBundle.PreflightAlert?.IsBlocked != true)
+                        {
+                            <span class="badge bg-light text-primary border">~@LastExportBundle.EstimatedTokens.ToString("N0") tokens</span>
+                        }
+                    </div>
+
+                    @if (LastExportBundle?.PreflightAlert?.IsBlocked == true)
+                    {
+                        <div class="card p-3 mb-3 rounded-3 shadow-sm" style="background: #fffbeb; border: 2px solid @(LastExportBundle.PreflightAlert.HasConflicts ? "#ef4444" : "#f59e0b") !important;">
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <span class="fs-4">@(LastExportBundle.PreflightAlert.HasConflicts ? "🚨" : "⚠️")</span>
+                                <h6 class="fw-bold mb-0 text-dark">@LastExportBundle.PreflightAlert.Title</h6>
+                            </div>
+                            <p class="small text-dark mb-3" style="line-height: 1.5;">
+                                @LastExportBundle.PreflightAlert.Description
+                            </p>
+
+                            <div class="p-2 rounded mb-3" style="background: #1e1e1e; border: 1px solid #333;">
+                                <div class="text-secondary small fw-bold mb-1 font-monospace">🛠️ Recommended Action:</div>
+                                @foreach (var cmd in LastExportBundle.PreflightAlert.Commands)
+                                {
+                                    <div class="font-monospace small text-light select-all" style="user-select: all;">@cmd</div>
+                                }
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between pt-2 border-top">
+                                <span class="small text-muted">Proceed anyway?</span>
+                                @if (HasPermission("pr-bypass-guard"))
+                                {
+                                    <button class="btn btn-warning btn-sm fw-bold px-3 shadow-sm" @onclick="BypassAndExportAsync" disabled="@IsProcessing">
+                                        @(IsProcessing ? "Bypassing & Generating..." : "⚡ Allow & Export Anyway")
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">🔒 Bypass requires 'PR: Allow & Export Anyway' permission</span>
+                                }
+                            </div>
+                        </div>
+                    }
+                    else if (LastExportBundle != null)
+                    {
+                        <div class="card p-3 mb-3 rounded-2" style="background: #f8fafc; border: 1px solid #e2e8f0 !important;">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                <h6 class="fw-bold text-dark mb-0 text-truncate" style="max-width: 80%;">
+                                    PR #@LastExportBundle.PrId: @LastExportBundle.Title
+                                </h6>
+                                <span class="badge bg-primary">@LastExportBundle.Repository</span>
+                            </div>
+                            <small class="text-muted font-monospace">@LastExportBundle.SourceBranch ➔ @LastExportBundle.TargetBranch</small>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-3"><div class="p-2 text-center rounded border bg-light"><small class="text-muted">Edited</small><div class="fw-bold text-primary fs-5">@LastExportBundle.Summary.Edited</div></div></div>
+                            <div class="col-3"><div class="p-2 text-center rounded border bg-light"><small class="text-muted">Added</small><div class="fw-bold text-success fs-5">@LastExportBundle.Summary.Added</div></div></div>
+                            <div class="col-3"><div class="p-2 text-center rounded border bg-light"><small class="text-muted">Deleted</small><div class="fw-bold text-danger fs-5">@LastExportBundle.Summary.Deleted</div></div></div>
+                            <div class="col-3"><div class="p-2 text-center rounded border bg-light"><small class="text-muted">Skipped</small><div class="fw-bold text-secondary fs-5">@(LastExportBundle.Summary.SkippedFormatting + LastExportBundle.Summary.SkippedExcluded + LastExportBundle.Summary.SkippedBinary)</div></div></div>
+                        </div>
+
+                        <div class="alert alert-success d-flex align-items-center py-2 px-3 mb-3 small" role="alert">
+                            <div class="me-2">📎</div>
+                            <div class="text-truncate font-monospace">Copied to Clipboard! Server Archive: <strong>@Path.GetFileName(LastExportBundle.SavedFilePath)</strong></div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="text-center py-5 text-muted">
+                            <div class="fs-1 mb-2">📦</div>
+                            <h6>No PR Export Generated Yet</h6>
+                            <p class="small mb-0">Enter a Pull Request URL and click <strong>Generate AI Bundle File</strong>.</p>
+                        </div>
+                    }
+                </div>
+
+                @if (LastExportBundle != null && LastExportBundle.PreflightAlert?.IsBlocked != true)
+                {
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary flex-grow-1 py-2 fw-bold" @onclick="DownloadBundleDirectly">
+                            ⬇️ Download Bundle File (.txt)
+                        </button>
+                        <button class="btn btn-success flex-grow-1 py-2 fw-bold" @onclick="ReCopyPrBundleFile">
+                            📋 Re-copy to Clipboard
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "reflect")
+    {
+        <div class="col-md-7">
+            <div class="card h-100 p-3 rounded-3 shadow-sm bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label fw-bold mb-0 text-dark">AI Review Response (JSON Payload):</label>
+                    <button type="button" class="btn btn-sm btn-outline-primary py-0 px-2 fw-bold" @onclick="PasteFromClipboardAsync">
+                        📋 Paste from Clipboard
+                    </button>
+                </div>
+                <textarea class="form-control font-monospace" rows="18"
+                          value="@ReviewPayloadText" @oninput="OnReviewPayloadInput"
+                          style="background: #f8fafc; font-size: 0.88rem;"
+                          placeholder="Paste the AI review JSON here (or click 'Paste from Clipboard')..."></textarea>
+            </div>
+        </div>
+
+        <div class="col-md-5">
+            <div class="card h-100 p-3 d-flex flex-column justify-content-between rounded-3 shadow-sm bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div>
+                    <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+                        <h6 class="fw-bold mb-0 text-dark">⚙️ Review Pipeline Controls</h6>
+                        <span class="badge @(ParsedReviewPayload != null ? "bg-success" : "bg-secondary")">
+                            @(ParsedReviewPayload != null ? "Payload Detected" : "Waiting for Paste")
+                        </span>
+                    </div>
+                    <div class="card p-3 mb-3 rounded-2" style="background: #f8fafc; border: 1px solid #e2e8f0 !important;">
+                        <h6 class="fw-bold mb-3 small text-uppercase" style="color: #2563eb; letter-spacing: 0.5px;">🏢 Organization & Target PR</h6>
+                        <div class="small">
+                            <div class="d-flex justify-content-between py-1 border-bottom">
+                                <span class="text-secondary fw-semibold">Target PR:</span>
+                                <span class="font-monospace fw-bold text-dark">@(ParsedReviewPayload?.Metadata != null ? $"#{ParsedReviewPayload.Metadata.PrId}" : "—")</span>
+                            </div>
+                            <div class="d-flex justify-content-between py-1 border-bottom">
+                                <span class="text-secondary fw-semibold">Project & Repo:</span>
+                                <span class="font-monospace fw-bold text-dark">
+                                    @(ParsedReviewPayload?.Metadata != null ? $"{ParsedReviewPayload.Metadata.Project} / {ParsedReviewPayload.Metadata.Repository}" : "—")
+                                </span>
+                            </div>
+                            <div class="d-flex justify-content-between py-1 border-bottom align-items-center">
+                                <span class="text-secondary fw-semibold">AI Verdict:</span>
+                                @if (ParsedReviewPayload?.Metadata != null && !string.IsNullOrEmpty(ParsedReviewPayload.Metadata.Verdict))
+                                {
+                                    <span class="badge @(ParsedReviewPayload.Metadata.Verdict == "APPROVE" ? "bg-success" : "bg-danger")">
+                                        @ParsedReviewPayload.Metadata.Verdict
+                                    </span>
+                                }
+                                else { <span class="text-muted font-monospace">—</span> }
+                            </div>
+                        </div>
+                    </div>
+                    @if (HasPermission("pr-approve"))
+                    {
+                        <div class="form-check p-2 rounded mb-3 d-flex align-items-center" style="background: #f0fdf4; border: 1px solid #bbf7d0 !important;">
+                            <input class="form-check-input ms-1 me-2" type="checkbox" @bind="ConfirmApproval" id="approvalCheck" />
+                            <label class="form-check-label fw-bold mb-0" for="approvalCheck" style="color: #15803d; cursor: pointer;">
+                                ✔ Approve Automatically (+10 Vote)
+                            </label>
+                        </div>
+                    }
+                </div>
+                <div>
+                    <button class="btn btn-success w-100 py-3 fw-bold shadow-sm" @onclick="ExecuteReflectAsync" disabled="@IsProcessing">
+                        @(IsProcessing ? "Applying Review Pipeline..." : "🚀 Apply Review (Feed Top)")
+                    </button>
+                    @if (!string.IsNullOrEmpty(LastReflectFilePath))
+                    {
+                        <div class="mt-2 pt-2 border-top d-flex justify-content-between align-items-center">
+                            <span class="small font-monospace text-muted text-truncate" style="max-width: 60%;">
+                                💾 @Path.GetFileName(LastReflectFilePath)
+                            </span>
+                            <button class="btn btn-sm btn-outline-primary fw-bold" @onclick="DownloadReflectedReviewDirectly">
+                                ⬇️ Download Copy
+                            </button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "clear")
+    {
+        <div class="col-12">
+            <div class="card shadow-sm p-3 bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-8">
+                        <label class="form-label fw-bold text-dark">Pull Request Full URL:</label>
+                        <input type="text" class="form-control" @bind="PrInput" style="background: #f8fafc; border: 1px solid #cbd5e1;" 
+                               placeholder="Enter the full URL of the pull request" />
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-danger w-100 py-2 fw-bold" @onclick="ExecuteClearAsync" disabled="@IsProcessing">
+                            @(IsProcessing ? "Resetting..." : "🧹 Purge AI Comments & Reset Vote")
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else if (ActiveTab == "threads")
+    {
+        <div class="col-12">
+            <div class="card shadow-sm p-3 bg-white" style="border: 1px solid #cbd5e1 !important;">
+                <div class="row g-3 align-items-end mb-3">
+                    <div class="col-md-8">
+                        <label class="form-label fw-bold text-dark">Pull Request Full URL:</label>
+                        <input type="text" class="form-control" @bind="PrInput" style="background: #f8fafc; border: 1px solid #cbd5e1;" 
+                               placeholder="Enter the full URL of the pull request" />
+                    </div>
+                    <div class="col-md-4">
+                        <button class="btn btn-info text-white w-100 py-2 fw-bold" @onclick="ExecuteExtractThreadsAsync" disabled="@IsProcessing">
+                            @(IsProcessing ? "Extracting Discussions..." : "💬 Extract All Discussions & Threads")
+                        </button>
+                    </div>
+                </div>
+                <div class="form-check form-switch pt-2 border-top">
+                    <input class="form-check-input" type="checkbox" id="sysCommentsSwitch" @bind="IncludeSystemCommentsInExtract" />
+                    <label class="form-check-label fw-bold text-dark" for="sysCommentsSwitch" style="cursor: pointer;">
+                        Include System Events & Automated Comments
+                    </label>
+                </div>
+                @if (!string.IsNullOrEmpty(LastThreadsFilePath))
+                {
+                    <div class="mt-3 pt-3 border-top d-flex gap-2">
+                        <button class="btn btn-primary flex-grow-1 py-2 fw-bold" @onclick="DownloadDiscussionsDirectly">
+                            ⬇️ Download Discussions (.txt)
+                        </button>
+                        <button class="btn btn-success flex-grow-1 py-2 fw-bold" @onclick="ReCopyDiscussionsBundleFile">
+                            📋 Re-copy to Clipboard
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public AuthStatusResponse? AuthStatus { get; set; }
+    [Parameter] public EventCallback<string> OnLog { get; set; }
+
+    private string ActiveTab = "export";
+    private string PrInput = "";
+    private string PatToken = "";
+    private bool ExportDiffOnly = false;
+    private int DiffContextLines = 6;
+    private bool IsProcessing = false;
+
+    private PrExportBundleResult? LastExportBundle;
+    private string ReviewPayloadText = "";
+    private bool ConfirmApproval = false;
+    private AiReviewPayload? ParsedReviewPayload;
+    private string? LastReflectFilePath;
+
+    private bool IncludeSystemCommentsInExtract = false;
+    private string? LastThreadsFilePath;
+    private string LastThreadsText = "";
+
+    private bool HasPermission(string key)
+    {
+        if (AuthStatus?.IsAuthenticated != true) return false;
+        if (AuthStatus.Roles?.Contains("Admin") == true) return true;
+        return AuthStatus.Permissions?.Contains(key, StringComparer.OrdinalIgnoreCase) == true;
+    }
+
+    private async Task LogAsync(string msg) => await OnLog.InvokeAsync(msg);
+
+    private void OnReviewPayloadInput(ChangeEventArgs e)
+    {
+        string text = e.Value?.ToString() ?? "";
+        ReviewPayloadText = text;
+        UpdateParsedPayload(text);
+    }
+
+    private void UpdateParsedPayload(string text)
+    {
+        ParsedReviewPayload = null;
+        LastReflectFilePath = null;
+        if (string.IsNullOrWhiteSpace(text)) return;
+        try
+        {
+            ParsedReviewPayload = JsonSerializer.Deserialize<AiReviewPayload>(text.Trim('`', ' '), new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch { }
+    }
+
+    private async Task PasteFromClipboardAsync()
+    {
+        try
+        {
+            ReviewPayloadText = await JS.InvokeAsync<string>("readTextFromClipboard");
+            UpdateParsedPayload(ReviewPayloadText);
+            await LogAsync("✔ Pasted AI review payload from clipboard.");
+        }
+        catch (Exception ex) { await LogAsync($"❌ Clipboard read error: {ex.Message}"); }
+    }
+
+    private async Task ExecuteExportAsync(bool forceExport = false)
+    {
+        if (string.IsNullOrWhiteSpace(PrInput)) return;
+        IsProcessing = true;
+        if (!forceExport) LastExportBundle = null;
+        await LogAsync("=== Mode 1: Initiating PR Bundle Export ===");
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/export-bundle", new PrExportRequest
+            {
+                PrInput = PrInput,
+                PatToken = PatToken,
+                DiffOnly = ExportDiffOnly,
+                ContextLines = DiffContextLines,
+                ForceExport = forceExport
+            });
+
+            var result = await resp.Content.ReadFromJsonAsync<OperationResponse<PrExportBundleResult>>();
+            if (result?.Logs != null) foreach (var l in result.Logs) await LogAsync(l);
+            if (result?.Success == true && result.Data != null)
+            {
+                LastExportBundle = result.Data;
+
+                if (LastExportBundle.PreflightAlert?.IsBlocked == true)
+                {
+                    await LogAsync($"⚠️ Guard: Export halted. {LastExportBundle.PreflightAlert.Title}");
+                }
+                else
+                {
+                    await JS.InvokeAsync<bool>("copyTextToClipboard", LastExportBundle.BundleText);
+                    await LogAsync("✔ Bundle copied to clipboard! (Ready for Ctrl + V in chat)");
+                }
+            }
+        }
+        catch (Exception ex) { await LogAsync($"❌ Export failed: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+
+    private async Task BypassAndExportAsync() => await ExecuteExportAsync(forceExport: true);
+
+    private async Task DownloadBundleDirectly()
+    {
+        if (LastExportBundle == null || LastExportBundle.PreflightAlert?.IsBlocked == true) return;
+        await JS.InvokeVoidAsync("saveFileLocally", Path.GetFileName(LastExportBundle.SavedFilePath), LastExportBundle.BundleText);
+        await LogAsync($"✔ Downloaded bundle to browser: {Path.GetFileName(LastExportBundle.SavedFilePath)}");
+    }
+
+    private async Task ReCopyPrBundleFile()
+    {
+        if (LastExportBundle == null || LastExportBundle.PreflightAlert?.IsBlocked == true) return;
+        await JS.InvokeAsync<bool>("copyTextToClipboard", LastExportBundle.BundleText);
+        await LogAsync("✔ Re-copied bundle to clipboard!");
+    }
+
+    private async Task ExecuteReflectAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ReviewPayloadText)) return;
+        IsProcessing = true;
+        await LogAsync("=== Mode 2: Reflecting Review to PR ===");
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/reflect-review", new ReflectReviewRequest
+            {
+                ReviewPayloadText = ReviewPayloadText, ConfirmApproval = ConfirmApproval, PatToken = PatToken, FallbackPrInput = PrInput
+            });
+
+            var result = await resp.Content.ReadFromJsonAsync<OperationResponse<ReflectReviewResult>>();
+            if (result?.Logs != null) foreach (var l in result.Logs) await LogAsync(l);
+            if (result?.Success == true && result.Data != null)
+            {
+                LastReflectFilePath = result.Data.SavedFilePath;
+                await LogAsync("✔ Review pipeline applied successfully to TFS.");
+            }
+        }
+        catch (Exception ex) { await LogAsync($"❌ Reflect failed: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+
+    private async Task DownloadReflectedReviewDirectly()
+    {
+        if (string.IsNullOrWhiteSpace(ReviewPayloadText)) return;
+        string fileName = !string.IsNullOrEmpty(LastReflectFilePath) ? Path.GetFileName(LastReflectFilePath) : "Reflected_Review.json";
+        await JS.InvokeVoidAsync("saveFileLocally", fileName, ReviewPayloadText);
+        await LogAsync($"✔ Downloaded reflected review copy: {fileName}");
+    }
+
+    private async Task ExecuteClearAsync()
+    {
+        if (string.IsNullOrWhiteSpace(PrInput)) return;
+        IsProcessing = true;
+        await LogAsync("=== Mode 3: Clearing Automated Review Threads ===");
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/clear-review", new ClearReviewRequest { PrInput = PrInput, PatToken = PatToken });
+            var result = await resp.Content.ReadFromJsonAsync<OperationResponse<string>>();
+            if (result?.Logs != null) foreach (var l in result.Logs) await LogAsync(l);
+            if (result?.Success == true) await LogAsync("✔ PR discussion feed and automated review comments cleared.");
+        }
+        catch (Exception ex) { await LogAsync($"❌ Clear failed: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+
+    private async Task ExecuteExtractThreadsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(PrInput)) return;
+        LastThreadsFilePath = null;
+        LastThreadsText = "";
+        IsProcessing = true;
+        await LogAsync("=== Mode 4: Extracting Discussions ===");
+
+        try
+        {
+            var resp = await Http.PostAsJsonAsync("api/tfsbridge/extract-threads", new ExtractThreadsRequest
+            {
+                PrInput = PrInput, PatToken = PatToken, IncludeSystemComments = IncludeSystemCommentsInExtract
+            });
+
+            var result = await resp.Content.ReadFromJsonAsync<OperationResponse<ExtractThreadsResult>>();
+            if (result?.Logs != null) foreach (var l in result.Logs) await LogAsync(l);
+            if (result?.Success == true && result.Data != null)
+            {
+                LastThreadsFilePath = result.Data.SavedFilePath;
+                LastThreadsText = result.Data.ThreadsText;
+                await JS.InvokeAsync<bool>("copyTextToClipboard", LastThreadsText);
+                await LogAsync("✔ Discussions copied to clipboard! (Ready to paste)");
+            }
+        }
+        catch (Exception ex) { await LogAsync($"❌ Extraction failed: {ex.Message}"); }
+        finally { IsProcessing = false; }
+    }
+
+    private async Task DownloadDiscussionsDirectly()
+    {
+        if (string.IsNullOrEmpty(LastThreadsFilePath) || string.IsNullOrEmpty(LastThreadsText)) return;
+        await JS.InvokeVoidAsync("saveFileLocally", Path.GetFileName(LastThreadsFilePath), LastThreadsText);
+        await LogAsync("✔ Downloaded discussions file to local machine.");
+    }
+
+    private async Task ReCopyDiscussionsBundleFile()
+    {
+        if (string.IsNullOrEmpty(LastThreadsText)) return;
+        await JS.InvokeAsync<bool>("copyTextToClipboard", LastThreadsText);
+        await LogAsync("✔ Discussions file re-copied to clipboard!");
+    }
+}
